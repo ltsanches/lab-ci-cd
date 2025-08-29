@@ -3,12 +3,18 @@ name: 'Deploy Infra'
 on:
   push:
     branches:
-      - infra
+      - '**'   # roda em todas as branches
+  pull_request:
+    branches:
+      - '**'   # roda também em qualquer PR
+  workflow_dispatch:
+
 env:
   TF_VERSION: 1.10.5
   TF_LINT_VERSION: v0.52.0
   DESTROY: false
   ENVIRONMENT: prod
+
 jobs:
   terraform:
     name: 'Deploy Infra'
@@ -22,6 +28,8 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0   # evita erro no push do terraform-docs
 
     - name: AWS | Configure credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -39,14 +47,21 @@ jobs:
         output-method: inject
         git-push: "true"
 
+    - name: Git | Sync before push
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        git pull --rebase origin $(git rev-parse --abbrev-ref HEAD) || true
+        git push origin HEAD:$(git rev-parse --abbrev-ref HEAD)
+
     - name: Terraform | Check required version
       run: |
         if [ -f versions.tf ];
           then
-            echo "TF_VERSION=$(grep required_version versions.tf | sed 's/"//g' | awk '{ print $3 }')" >> $GITHUB_ENV
+            echo "TF_VERSION=$(grep required_version versions.tf | sed 's/\"//g' | awk '{ print $3 }')" >> $GITHUB_ENV
           else
             echo "Not set required_version in versions.tf, using default version in variable TF_VERSION in file .github/workflows/infra.yml"
-            echo "TF_VERSION="${{ env.TF_VERSION }}"" >> $GITHUB_ENV
+            echo "TF_VERSION=${{ env.TF_VERSION }}" >> $GITHUB_ENV
         fi
 
     - name: Terraform | Setup
@@ -81,7 +96,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.tflint.d/plugins
-        key: ${{ matrix.os }}-tflint-${{ hashFiles('.tflint.hcl') }}
+        key: ${{ runner.os }}-tflint-${{ hashFiles('.tflint.hcl') }}
 
     - name: TFlint | Setup TFLint
       uses: terraform-linters/setup-tflint@v4
